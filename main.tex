@@ -1,0 +1,125 @@
+% !TeX program = xelatex
+\documentclass[11pt,a4paper,fontset=fandol]{ctexart}
+\usepackage[margin=2.35cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,array,enumitem,xcolor,hyperref,fancyhdr,microtype}
+\definecolor{ink}{HTML}{163349}
+\definecolor{accent}{HTML}{087E8B}
+\hypersetup{colorlinks=true,linkcolor=ink,urlcolor=accent,pdftitle={深度学习入门：面向论文阅读的学习笔记}}
+\setlist[itemize]{itemsep=2pt,topsep=3pt,leftmargin=1.6em}
+\setlist[enumerate]{itemsep=2pt,topsep=3pt,leftmargin=1.8em}
+\setlength{\parindent}{2em}\setlength{\parskip}{2pt}
+\pagestyle{fancy}\fancyhf{}\fancyhead[L]{\small MIT 6.S191 · 深度学习入门笔记}\fancyhead[R]{\small 论文阅读基础}\fancyfoot[C]{\thepage}\renewcommand{\headrulewidth}{0.3pt}
+\newcommand{\R}{\mathbb{R}}
+\title{\vspace{-1.4cm}\textbf{深度学习入门}\\\large 面向计算机视觉论文阅读的学习笔记}
+\author{基于 MIT 6.S191 2026 Lecture 1 整理的非官方笔记}
+\date{2026 年 11 月}
+\begin{document}\maketitle
+\begin{abstract}
+本笔记围绕神经网络的前向计算、损失、梯度、反向传播、优化与泛化，整理理解视觉论文所需的基础概念。正文包含数值算例、维度检查、常见论文术语和练习答案。课件中关于课程安排的内容从略；本笔记是重新组织的学习材料，不是官方逐页译本。
+\end{abstract}
+\tableofcontents
+\section{一张训练流程图}
+深度学习模型可以写为 $\hat y=f_{\theta}(x)$：$x$ 是输入，$\hat y$ 是预测，$\theta$ 是可学习参数。给定目标 $y$，用损失函数 $L(\hat y,y)$ 衡量预测与目标的差距。一次训练更新的主线为
+\[
+\text{输入数据}\rightarrow\text{前向计算}\rightarrow\text{损失}\rightarrow\text{反向传播求梯度}\rightarrow\text{优化器更新参数}.
+\]
+\textbf{参数}由训练学习，例如权重与偏置；\textbf{超参数}由实验配置，例如学习率、批大小和网络结构。训练用数据调整参数；推理用已确定的参数作预测。
+\section{神经元与激活函数}
+\subsection{加权求和}
+神经元先对输入加权并加上偏置，再应用激活函数：
+\[
+z=w_1x_1+w_2x_2+b=\mathbf w^{\mathsf T}\mathbf x+b,\qquad \hat y=g(z).
+\]
+例如 $z=0.3x_1+0.2x_2-1$，当 $x_1=4,x_2=5$ 时，$z=1.2$。权重控制输入变化对该神经元输出的影响，偏置调整变换的截距；深层网络中的单个权重一般不应被直接解释为因果效应。
+\subsection{激活与非线性}
+Sigmoid 函数 $\sigma(z)=1/(1+e^{-z})$ 将实数映射到 $(0,1)$；对上述例子，$\sigma(1.2)\approx0.769$。若输出被定义为二分类的概率，则可把它视为正类的预测概率。ReLU 定义为 $\operatorname{ReLU}(z)=\max(0,z)$，例如 $\operatorname{ReLU}(-3)=0$、$\operatorname{ReLU}(2)=2$。Tanh 的输出范围为 $(-1,1)$。
+
+激活函数使网络能够表示非线性关系。若没有非线性，两层仿射变换仍可合并成一层：
+\[
+W_2(W_1x+b_1)+b_2=(W_2W_1)x+(W_2b_1+b_2).
+\]
+因此，单纯叠加仿射层不会增加整体函数的非线性表达能力。
+\section{多层网络与维度}
+考虑一个含隐藏层的网络：
+\[
+h=\operatorname{ReLU}(W_1x+b_1),\qquad \hat y=\sigma(W_2h+b_2).
+\]
+若 $x\in\R^2$、$h\in\R^3$、输出为标量，则 $W_1\in\R^{3\times2}$、$b_1\in\R^3$、$W_2\in\R^{1\times3}$、$b_2\in\R$。参数总数为 $3\times2+3+1\times3+1=13$。全连接层（dense / fully connected layer）把每个输入分量连接到每个输出分量。多层感知机（MLP）通常由多层全连接层和激活函数组成。
+
+\textbf{读论文时：}先标记各变量的维度，追踪输入、隐藏表示和输出，再判断哪些矩阵是可学习参数。现代网络也会使用卷积、注意力等模块，但仍可以沿数据流追踪。
+\section{损失函数：把错误变成数值}
+\subsection{二分类交叉熵}
+对于标签 $y\in\{0,1\}$、正类预测概率 $p\in(0,1)$，二分类交叉熵为
+\[
+L_{\mathrm{BCE}}(p,y)=-\bigl[y\log p+(1-y)\log(1-p)\bigr],
+\]
+其中 $\log$ 为自然对数。若真实标签 $y=1$，损失简化为 $-\log p$：
+\begin{center}\begin{tabular}{lccc}\toprule
+预测概率 $p$ & 0.9 & 0.5 & 0.1\\\midrule
+损失 $-\log p$ & 0.105 & 0.693 & 2.303\\\bottomrule\end{tabular}\end{center}
+对错误预测越有信心，损失通常越大。实际实现常直接使用 logits（Sigmoid 前的分数）计算交叉熵，以改善数值稳定性。
+\subsection{均方误差与经验损失}
+回归任务可使用平方误差；预测 75、真实值 80 时，单样本平方误差为 $(75-80)^2=25$。对于 $N$ 个样本，平均经验损失可以写成
+\[
+J(\theta)=\frac1N\sum_{i=1}^{N}L\bigl(f_\theta(x_i),y_i\bigr).
+\]
+具体任务应根据输出、数据和目标选择损失。论文中的 $L=L_{\mathrm{recon}}+\lambda L_{\mathrm{reg}}$ 表示总目标由重建损失和加权正则项组成；要进一步查明重建目标、正则化对象和 $\lambda$ 的选择方式。
+\section{优化：用梯度更新参数}
+训练常写成 $\theta^*=\arg\min_{\theta}J(\theta)$，即寻找使训练目标较小的参数。深度学习的优化一般不保证找到全局最优。
+
+梯度描述损失在当前位置对参数的局部变化。梯度下降更新为
+\[
+\theta\leftarrow\theta-\eta\nabla_{\theta}J(\theta),
+\]
+其中 $\eta$ 是学习率。若 $w=2$、$\partial J/\partial w=3$、$\eta=0.1$，则更新后 $w=1.7$；若梯度为 $-3$，则更新后 $w=2.3$。学习率太小可能使训练很慢，太大可能使训练不稳定或发散。SGD、Adam 等优化器使用梯度生成更新；Adam 根据梯度历史调整更新尺度，仍需设置学习率。
+\section{反向传播：链式法则}
+前向传播负责计算预测与损失；反向传播沿计算图使用链式法则计算梯度；优化器随后使用梯度更新参数。
+
+设 $\hat y=wx$、$L=(\hat y-y)^2$，取 $x=2,w=1,y=3$。前向计算得 $\hat y=2$，$L=1$。反向计算：
+\[
+\frac{\partial L}{\partial w}=
+\frac{\partial L}{\partial\hat y}\frac{\partial\hat y}{\partial w}
+=2(\hat y-y)x=2(2-3)\times2=-4.
+\]
+令 $\eta=0.1$，更新为 $w_{\mathrm{new}}=1-0.1(-4)=1.4$。再次预测为 $2.8$，损失为 $0.04$。这是一个单样本例子；真实网络有大量参数，自动微分框架会处理相同的链式法则。
+\section{批次、训练轮次与优化}
+\begin{itemize}
+\item \textbf{Batch：}一次共同处理的一组样本；batch size 是其大小。
+\item \textbf{Iteration / step：}通常指处理一批数据并进行一次参数更新，具体实现可能有梯度累积等差异。
+\item \textbf{Epoch：}训练集被遍历一遍。
+\end{itemize}
+例如训练集有 1000 个样本，batch size 为 100，每个样本每轮使用一次且每批更新一次，则一个 epoch 有 10 次更新。小批次允许并行计算，并用批次梯度近似全数据梯度；批大小还影响内存、速度和优化行为。
+\section{泛化、数据划分与正则化}
+模型的训练表现好并不自动意味着对未见数据表现也好。\textbf{过拟合}表现为训练结果很好，但在合适的未见数据上明显变差；\textbf{欠拟合}则可能表现为训练与验证均较差。差距还可能来自训练与验证分布不同或评测设置等，需要进一步检查。
+\begin{itemize}
+\item \textbf{训练集：}用于计算梯度、调整参数。
+\item \textbf{验证集：}用于选择超参数、模型检查点和停止时机。
+\item \textbf{测试集：}用于最终评估；反复依据测试结果调整模型会削弱其独立评估作用。
+\end{itemize}
+\textbf{Dropout} 在训练时随机将部分激活置零；比例与使用位置依任务而定，推理时一般关闭。\textbf{Early stopping} 可以根据验证集表现停止训练或选择最优检查点。课件示意图将监控曲线标为 testing；规范实践中应使用验证集作模型选择，保留测试集用于最终评估。
+\section{从术语进入论文}
+\begin{center}\small\begin{tabular}{p{0.27\linewidth}p{0.65\linewidth}}\toprule
+术语 & 阅读时的含义\\\midrule
+Encoder / feature & 将输入转换为中间表示的模块 / 中间表示。\\
+Loss / objective & 训练中优化的目标；检查每一项和它们的权重。\\
+Pretraining / fine-tuning & 先在其他任务或数据上训练，再将参数用于目标任务并可能继续训练。\\
+Optimizer / learning rate & 参数更新算法 / 控制更新的学习率设置。\\
+Checkpoint & 某一训练时刻保存的模型参数等状态。\\
+Validation accuracy & 验证集上的准确率；需查看是否用于模型选择。\\\bottomrule\end{tabular}\end{center}
+读方法时先问：输入是什么？模型可学习的参数是什么？输出是什么？损失如何定义？用什么数据进行评估？随后检查数据划分、基线、评价协议和实验波动。
+
+在一个简化的新视角合成例子中：输入可为多张图片及相机参数；模型学习场景表示；渲染器产生预测图片；损失比较预测与真实图片；最终在未用于训练的视角上评估。具体方法的表示、损失和评价协议可能不同。
+\section{自测与答案}
+\begin{enumerate}
+\item 真实标签为 1，而预测正类概率为 0.1，交叉熵损失大还是小？
+\item 反向传播与优化器更新有什么区别？
+\item 2000 个样本，batch size 为 100，每个样本每轮使用一次且每批更新一次，一个 epoch 有多少次更新？
+\item 训练准确率 99\%，验证准确率 65\%，可能说明什么？还要检查什么？
+\end{enumerate}
+\textbf{参考答案：}（1）较大，$-\log(0.1)\approx2.303$。（2）反向传播计算梯度，优化器利用梯度生成参数更新。（3）20 次。（4）可能存在过拟合；还应检查数据划分、分布差异、标签质量及训练与验证评测方式是否一致。
+\section{课件定位与来源}
+本笔记依据 MIT Introduction to Deep Learning, 6.S191, Lecture 1: \emph{Introduction to Deep Learning}（Alexander Amini，2026 年 1 月 5 日），并添加解释、算例与论文阅读提示。课件页码：20--32 神经元与激活；33--43 网络；44--53 损失；54--70 优化与反向传播；71--91 学习率与批次；92--106 过拟合与正则化。
+
+官方课程：\url{https://introtodeeplearning.com/}\\
+官方课件：\url{https://introtodeeplearning.com/slides/6S191_MIT_DeepLearning_L1.pdf}
+\end{document}
