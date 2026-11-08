@@ -1,5 +1,6 @@
 % !TeX program = xelatex
-\documentclass[11pt,a4paper,fontset=fandol]{ctexart}
+\documentclass[11pt,a4paper,fontset=none]{ctexart}
+\IfFontExistsTF{Songti SC}{\setCJKmainfont{Songti SC}\setCJKsansfont{Heiti SC}\setCJKmonofont{Heiti SC}}{\setCJKmainfont{FandolSong-Regular.otf}[BoldFont=FandolSong-Bold.otf]\setCJKsansfont{FandolHei-Regular.otf}\setCJKmonofont{FandolFang-Regular.otf}}
 \usepackage[margin=2.35cm]{geometry}
 \usepackage{amsmath,amssymb,booktabs,array,enumitem,xcolor,hyperref,fancyhdr,microtype}
 \definecolor{ink}{HTML}{163349}
