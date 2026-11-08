@@ -1,0 +1,149 @@
+% !TeX program = xelatex
+\documentclass[11pt,a4paper,fontset=none]{ctexart}
+\IfFontExistsTF{Songti SC}{\setCJKmainfont{Songti SC}\setCJKsansfont{Heiti SC}\setCJKmonofont{Heiti SC}}{\setCJKmainfont{FandolSong-Regular.otf}[BoldFont=FandolSong-Bold.otf]\setCJKsansfont{FandolHei-Regular.otf}\setCJKmonofont{FandolFang-Regular.otf}}
+\usepackage[margin=2.35cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,array,enumitem,xcolor,hyperref,fancyhdr,microtype}
+\definecolor{ink}{HTML}{163349}
+\definecolor{accent}{HTML}{087E8B}
+\hypersetup{colorlinks=true,linkcolor=ink,urlcolor=accent,pdftitle={深度学习入门：面向论文阅读的学习笔记}}
+\setlist[itemize]{itemsep=2pt,topsep=3pt,leftmargin=1.6em}
+\setlist[enumerate]{itemsep=2pt,topsep=3pt,leftmargin=1.8em}
+\setlength{\parindent}{2em}\setlength{\parskip}{2pt}
+\pagestyle{fancy}\fancyhf{}\fancyhead[L]{\small CV 核心知识 · 论文阅读笔记}\fancyhead[R]{\small 论文阅读基础}\fancyfoot[C]{\thepage}\renewcommand{\headrulewidth}{0.3pt}
+\newcommand{\R}{\mathbb{R}}
+\title{\vspace{-1.4cm}\textbf{计算机视觉核心知识}\\\large CNN、Transformer、视觉任务与相机模型}
+\author{面向论文阅读的非官方中文学习笔记}
+\date{2026 年 11 月}
+\begin{document}\maketitle
+\begin{abstract}
+本笔记依据当前材料包中的 Stanford CS231n 四讲与 CS231A 相机模型讲义编写，重点解释概念、公式、数据流、实验指标与 3D 论文阅读。它是按学习目标重新组织的笔记，不是官方译本；MIT 深度学习基础笔记见本仓库另一个 PDF。个别指标与 3D 应用为帮助阅读论文而补充，文中明确标示。
+\end{abstract}
+\setcounter{tocdepth}{1}
+\tableofcontents\newpage
+\section{阅读地图与基本符号}
+研究论文可沿着\textbf{输入数据 $\to$ 特征提取 $\to$ 任务预测 $\to$ 训练目标 $\to$ 评测}追踪。视觉模型的输入常用张量表示。下文约定图像批次为 $X\in\R^{N\times C\times H\times W}$，其中 $N$ 是批大小，$C$ 是通道数，$H,W$ 是高度与宽度。也有代码使用 NHWC 排列，必须查实现而不能只看数字。
+
+CNN 通过局部卷积、共享权重和逐层组合提取图像特征；Transformer 通过注意力在 token 之间传递信息；检测、分割等任务决定输出格式；相机模型将 3D 几何与 2D 图像联系起来。训练、损失与梯度基础请先参阅本仓库的 MIT 笔记。
+\section{CNN：从像素到特征（CS231n L5）}
+\subsection{图像特征、卷积和权重共享}
+直接把 $32\times32\times3$ 图像拉直成 3072 维向量，会忽略网络结构中的空间邻近关系。卷积核每次处理局部区域，并在不同位置复用相同的权重。对于一个输出通道，深度学习中常见的卷积实现实际上采用互相关：
+\[
+y_{o,i,j}=b_o+\sum_{c=1}^{C_{\rm in}}\sum_{u=0}^{K-1}\sum_{v=0}^{K-1}W_{o,c,u,v}\,x_{c,\,is+u-p,\,js+v-p}.
+\]
+其中 $K$ 是核大小，$s$ 为步长，$p$ 为填充；越界位置按填充规则处理。每个输出通道对应一组覆盖全部输入通道的卷积核，所有位置共享该组权重。偏置若每个输出通道一个，则参数数量为
+\[
+C_{\rm out}(C_{\rm in}K^2+1).
+\]
+例：输入 $3\times32\times32$，使用 16 个 $3\times3$ 核、步长 1、填充 1，输出为 $16\times32\times32$，参数数为 $16(3\cdot3\cdot3+1)=448$。若不计偏置则为 432。
+\subsection{尺寸、感受野与下采样}
+对方形核且无 dilation 的情况，输出高度为
+\[
+H_{\rm out}=\left\lfloor\frac{H+2p-K}{s}\right\rfloor+1,
+\]
+宽度同理。例：$H=32,K=3,p=1,s=2$，得到 $H_{\rm out}=16$。stride 变大通常降低空间分辨率。\textbf{感受野}是某个输出可能依赖的输入区域；连续两层 $3\times3$、stride 1 的卷积理论感受野从 $3\times3$ 增至 $5\times5$。若存在下采样或 dilation，需逐层计算。
+
+最大池化在局部窗口内取最大值，常用于下采样；卷积也可以通过 stride 下采样。分辨率降低节省计算并扩大后续特征的有效覆盖范围，但可能损失精细位置。实际网络可借助多尺度或跳跃连接恢复细节。
+
+在适当的边界和步长条件下，卷积具有平移等变性：输入平移，输出特征也相应平移；这不等于分类结果对任意平移都严格不变。填充、下采样和边界会影响这种性质。
+\subsection{读论文时检查}
+看网络图时记录每个阶段的 $(C,H,W)$、卷积核与 stride。\textbf{Backbone} 通常提取特征，\textbf{head} 将特征变成特定任务预测。卷积层输出的不同通道是学得的特征，不应简单等同于人类可命名的概念。L5 建议重点看 PDF 第 47--68、69--94、100--105 页。
+\section{CNN 训练与网络架构（CS231n L6）}
+\subsection{归一化、非线性与残差}
+归一化层按某些维度计算统计量并变换激活；例如 LayerNorm 通常对每个样本的特征维做归一化。具体归一化维度取决于网络与实现，不应将 LayerNorm 和 BatchNorm 混为一谈。ReLU、GELU 等激活引入非线性；初始化影响初期激活和梯度的尺度。
+
+VGG 将多层卷积堆叠；ResNet 的残差块写作
+\[
+y=x+F(x;\theta).
+\]
+$F$ 学习一个变换，旁路把 $x$ 送到加法节点。当形状不相容时，实际实现需要投影或调整维度。残差路径有助于优化深层网络，但不意味着网络天然不会过拟合。
+\subsection{训练策略}
+\begin{itemize}
+\item \textbf{初始化：}若初始权重太小或太大，激活与梯度可能衰减或爆炸。常见初始化根据输入维度和激活函数设定尺度；具体方案需匹配网络。
+\item \textbf{输入归一化：}按训练设置对图像各通道中心化和缩放，评测时保持一致。
+\item \textbf{数据增强：}翻转、随机裁剪、颜色扰动等可增加训练样本变化，但变换必须保留当前任务的正确标签；例如某些方向敏感任务不能随意翻转。
+\item \textbf{迁移学习：}预训练 backbone 后，可冻结特征提取器训练新 head，或对部分或全部参数微调。比较方法时要检查预训练数据和权重。
+\item \textbf{超参数诊断：}观察训练与验证曲线、初始 loss、学习率与训练时间；验证集有助于选超参数，测试集用于最终评估。
+\end{itemize}
+L6 重点看第 11--20、24--31、46--58、60--76、78--96 页。阅读实验设置时记录输入尺寸、优化器、batch size、预训练、训练预算与数据增强，避免只比较最后一列分数。
+\section{注意力与 Transformer（CS231n L8）}
+\subsection{从加权求和理解注意力}
+注意力用输入相关的权重聚合信息。对于 token 表示 $X\in\R^{N\times d}$，线性投影得到 $Q=XW_Q$、$K=XW_K$、$V=XW_V$。若 $Q,K\in\R^{N\times d_k}$、$V\in\R^{N\times d_v}$，则
+\[
+A=\operatorname{softmax}\left(\frac{QK^{\mathsf T}}{\sqrt{d_k}}\right),\qquad Y=AV.
+\]
+$A\in\R^{N\times N}$，softmax 沿每个查询对应的键位置计算；每行的权重和为 1。$A_{ij}$ 描述第 $i$ 个查询对第 $j$ 个 value 的聚合权重。比如某行权重为 $(0.7,0.2,0.1)$，输出是 $0.7v_1+0.2v_2+0.1v_3$。
+
+自注意力中的 $Q,K,V$ 来自同一组 token；交叉注意力通常由一组 token 产生查询，另一组产生键和值。多头注意力并行计算多组投影及注意力，再合并。注意力权重可帮助观察模型的信息聚合，但单凭权重不能直接证明因果解释。
+\subsection{位置、复杂度与 Transformer block}
+仅使用上述无位置自注意力时，置换输入 token 会相应置换输出；模型需要通过位置编码等机制获取顺序或空间位置。标准全局注意力显式形成 $N\times N$ 的分数矩阵，随 token 数增长通常有二次计算与存储压力；不同实现和近似方法可改变实际内存开销。
+
+一个典型 Transformer block 包含注意力、逐 token 的 MLP、残差连接和归一化。具体为 pre-norm 还是 post-norm，激活与注意力实现如何，应依论文或代码为准。自回归语言建模常用因果 mask 防止访问未来 token；视觉编码器并非都使用因果 mask。
+\subsection{视觉 Transformer（ViT）}
+将大小 $H\times W$ 的图像切为 $P\times P$ patch，若尺寸可整除，则 token 数为 $N=(H/P)(W/P)$。每个 patch 展平并投影到 $d$ 维，加入位置信息后输入 Transformer。分类输出可使用特殊 token 或对输出 token 做池化；实现因模型而异。
+
+例：$224\times224$ 图像、$16\times16$ patch，得到 $14\times14=196$ 个图像 token（若额外加入分类 token，序列会更长）。patch 更小通常增加 token 数及全局注意力成本。L8 重点看第 13--19、63--79、85--93、101--110 页。
+\section{视觉任务、预测与评测（CS231n L9）}
+\subsection{任务区别}
+\begin{center}\small\begin{tabular}{p{.22\linewidth}p{.35\linewidth}p{.34\linewidth}}\toprule
+任务 & 输出 & 两只猫的例子\\\midrule
+分类 & 整图类别或分数 & 图中有猫\\
+检测 & 类别、置信度与边界框 & 分别框出两只猫\\
+语义分割 & 每个像素的类别 & 猫像素都标为猫\\
+实例分割 & 每个实例的类别与掩码 & 分开标出每只猫的像素\\\bottomrule\end{tabular}\end{center}
+语义分割需要逐像素结果。全卷积网络可先下采样提取语义，再上采样恢复空间分辨率；U-Net 将高分辨率编码器特征与解码器特征连接，帮助恢复细节。上采样可以用插值或可学习算子；转置卷积不是普通卷积的通用数学逆运算。
+\subsection{检测与实例分割}
+检测模型必须处理一张图中目标数量不固定的问题。两阶段检测器先提出候选区域，再进行分类和边界框修正；单阶段检测器直接从特征预测多个候选。经典 R-CNN 系列、YOLO 和 DETR 的具体实现不同，不能把所有版本当成同一个模型。DETR 直接预测一个集合，并通过匹配训练使预测与目标对应。Mask R-CNN 在检测框架中增加实例掩码预测分支。
+\subsection{指标补充：IoU、AP 与公平比较}
+以下指标解释是论文阅读补充，不假设 L9 完整涵盖了所有指标。对于预测区域 $A$ 和真实区域 $B$：
+\[
+\operatorname{IoU}(A,B)=\frac{|A\cap B|}{|A\cup B|}.
+\]
+IoU 可用于框或掩码；需结合匹配规则与阈值。检测中 precision 为预测正例中正确的比例，recall 为真实目标中被检出的比例；AP 汇总精确率与召回率的关系，mAP 通常对多个类别及可能的 IoU 阈值取平均。不同基准的 AP 定义和阈值可能不同，比较时要查协议。语义分割的 mIoU 通常先计算各类别的 IoU 再平均，同样需要确认忽略类别等规则。
+
+比较论文表格时记录数据集与划分、训练数据和预训练、输入分辨率、指标及阈值、训练预算、计算量和模型规模。不应将不同协议的数字直接排名。可视化中的 saliency、CAM、Grad-CAM 是分析工具，热图并不自动证明模型的因果依据。L9 重点看第 30--63、65--111、112--122、128--145 页。
+\section{相机模型与 3D 视觉（CS231A Camera Models）}
+\subsection{针孔投影：三维点到二维像素}
+先固定坐标约定：设三维点在相机坐标系中为 $\mathbf X_c=(X_c,Y_c,Z_c)^{\mathsf T}$，取朝前的 $Z_c>0$，并将图像平面表述为正向投影。无畸变时，归一化图像坐标为 $x=X_c/Z_c$、$y=Y_c/Z_c$；若忽略 skew，像素坐标为
+\[
+u=f_x X_c/Z_c+c_x,\qquad v=f_y Y_c/Z_c+c_y.
+\]
+例如 $\mathbf X_c=(1,0.5,2)$、$f_x=f_y=800$、$(c_x,c_y)=(320,240)$，得到 $(u,v)=(720,440)$。在同一射线上的 $(2,1,4)$ 也投影到这个像素：\textbf{单个像素不能独自确定深度}。不同教材可能采用不同图像平面、轴方向和符号约定，不能脱离约定照搬符号。
+\subsection{齐次坐标、内参与外参}
+用 $\tilde{\mathbf u}=(u,v,1)^{\mathsf T}$ 和 $\tilde{\mathbf X}_w=(X_w,Y_w,Z_w,1)^{\mathsf T}$ 表示齐次坐标，一种常见的世界到相机约定为
+\[
+\lambda\tilde{\mathbf u}=K[R\mid t]\tilde{\mathbf X}_w,
+\quad K=\begin{bmatrix}f_x&s&c_x\\0&f_y&c_y\\0&0&1\end{bmatrix},\quad
+\mathbf X_c=R\mathbf X_w+t.
+\]
+$K$ 为内参，$s$ 为 skew；$R,t$ 为上述方向约定下的外参。齐次向量差一个非零尺度代表同一投影点；需要除以第三分量才能获得像素坐标。相机中心满足 $R\mathbf C_w+t=0$，所以 $\mathbf C_w=-R^{\mathsf T}t$。这说明外参中的 $t$ 并不直接等于世界坐标下的相机位置。
+
+如果论文给的是相机到世界的位姿，则需先求逆：$R_{wc}=R_{cw}^{\mathsf T}$、$t_{wc}=-R_{cw}^{\mathsf T}t_{cw}$。上标或下标习惯各异，务必从作者定义核对方向。旋转矩阵满足 $R^{\mathsf T}R=I$ 且 $\det R=1$。
+\subsection{射线、标定和近似模型}
+若已知内参且忽略畸变，像素 $(u,v)$ 对应相机坐标系方向 $\mathbf d_c\propto K^{-1}(u,v,1)^{\mathsf T}$。将方向转到世界坐标，可用世界空间的相机中心 $\mathbf C_w$ 表示射线：
+\[
+\mathbf r(\tau)=\mathbf C_w+\tau\mathbf d_w,\qquad \tau\geq0.
+\]
+这是多视角重建与渲染中的常见起点；$\tau$ 与相机 $Z$ 深度是否相同取决于射线方向的归一化和定义。
+
+\textbf{相机标定}通过已知几何和图像对应关系估计内参与外参；可使用棋盘等标定物，结果会受观测噪声和退化配置影响。真实镜头存在径向等畸变，理想针孔公式不能直接覆盖所有镜头。\textbf{弱透视}适用于物体深度变化相对平均距离较小的近似情形，用近似固定的深度替代逐点深度；\textbf{正交投影}进一步忽略深度造成的透视缩放。这些是近似模型，不应在显著透视变化下无条件使用。
+
+阅读 3D 论文时明确：像素坐标与分辨率、内参是否随缩放改变、位姿方向、单位、坐标轴朝向、是否去畸变、深度定义以及训练和测试视角如何划分。CS231A 笔记第 1--9 页覆盖针孔与内外参，第 10--13 页涉及标定，第 14--17 页涉及变换与近似投影。
+\section{论文阅读练习与参考答案}
+\begin{enumerate}
+\item 输入 $3\times32\times32$，16 个 $3\times3$ 卷积核，stride 2、padding 1，输出尺寸与参数量是多少（计偏置）？
+\item 图像大小 $224\times224$，patch 为 $16\times16$，ViT 得到多少图像 token？全局注意力分数矩阵有多大？
+\item 两只猫被同一种标签覆盖，无法区分各自像素，这符合语义分割还是实例分割？
+\item 某点相机坐标为 $(1,0,2)$，另一个是 $(2,0,4)$。理想针孔投影中它们为什么可能落在同一像素？
+\item 如果一个方法的 AP 比另一个高，判断优劣前还应核对哪些条件？
+\end{enumerate}
+\textbf{参考答案：}（1）$16\times16\times16$；参数 $16(3\cdot3\cdot3+1)=448$。（2）196 个；不含额外 token 时为 $196\times196$。（3）语义分割。（4）它们的 $X/Z$ 和 $Y/Z$ 相同，位于同一相机射线上。（5）数据集和划分、预训练、指标阈值、输入、训练预算及计算成本等。
+\section{来源与版本}
+原始资料为官方课程文件，本仓库不再分发原始讲义。CS231n L5 虽由 2026 课程链接提供，但原 PDF 页脚仍标 2025；CS231A 相机讲义为未标年份的通用笔记。
+\begin{itemize}
+\item CS231n L5: \url{https://cs231n.stanford.edu/slides/2026/lecture_5.pdf}
+\item CS231n L6: \url{https://cs231n.stanford.edu/slides/2026/lecture_6.pdf}
+\item CS231n L8: \url{https://cs231n.stanford.edu/slides/2026/lecture_8.pdf}
+\item CS231n L9: \url{https://cs231n.stanford.edu/slides/2026/lecture_9.pdf}
+\item \href{https://web.stanford.edu/class/cs231a/course_notes/01-camera-models.pdf}{CS231A Camera Models 官方讲义}
+\end{itemize}
+\end{document}
